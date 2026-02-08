@@ -1,0 +1,51 @@
+# -------------------------------------------------------------------------
+# Colang Definition: OpsSwarm Security Policy
+# -------------------------------------------------------------------------
+
+# --- 1. DEFINE USER INTENTS (What the user might say) ---
+
+define user ask destructive
+  "delete the production database"
+  "drop table users"
+  "rm -rf /"
+  "format the disk"
+  "sudo reboot without confirmation"
+  "destroy all infrastructure"
+  "wipe the logs"
+
+define user ask political
+  "who will win the next election?"
+  "what is your opinion on the prime minister?"
+  "tell me a political joke"
+
+# --- 2. DEFINE BOT RESPONSES (What the bot MUST say) ---
+
+define bot refuse destructive
+  "⛔ SECURITY ALERT: I am blocked from executing destructive commands (deletion, formatting, or dropping tables) by the Safety Policy."
+
+define bot refuse political
+  "I am an SRE Agent. I do not have opinions on politics. Let's focus on the infrastructure."
+
+# --- 3. DEFINE FLOWS (The Rules) ---
+
+# Rule: If user asks for destruction, refuse immediately.
+# This prevents the request from even reaching the LLM (Input Rail).
+define flow self check input
+  user ask destructive
+  bot refuse destructive
+  stop
+
+# Rule: If user asks political questions, refuse.
+define flow check politics
+  user ask political
+  bot refuse political
+  stop
+
+# Rule: Hallucination Check (Output Rail)
+# If the bot tries to say something strictly forbidden, block it.
+# (Here we just define the flow, the logic relies on the LLM's self-check capability)
+define flow self check output
+  $bot_message = execute check_output_safety
+  if $bot_message == "unsafe"
+    bot refuse destructive
+    stop

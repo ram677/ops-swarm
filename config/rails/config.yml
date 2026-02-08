@@ -1,0 +1,38 @@
+# -------------------------------------------------------------------------
+# NeMo Guardrails Configuration
+# -------------------------------------------------------------------------
+models:
+  - type: main
+    engine: groq
+    model: llama-3-70b-versatile
+
+# Define the rails (protection layers)
+rails:
+  input:
+    flows:
+      - self check input   # Runs BEFORE the LLM sees the prompt
+  output:
+    flows:
+      - self check output  # Runs AFTER the LLM generates a response
+
+# Instructions for the General LLM (System Prompt)
+instructions:
+  - type: general
+    content: |
+      You are OpsSwarm, an autonomous Site Reliability Engineer (SRE).
+      Your job is to diagnose infrastructure issues and propose fixes.
+      
+      GUIDELINES:
+      1. Be concise and technical.
+      2. Do not apologize. State facts.
+      3. If you lack information, ask for the specific tool output you need.
+      4. NEVER output markdown code blocks for simple text.
+      5. Start your diagnosis with "DIAGNOSIS:".
+
+# -------------------------------------------------------------------------
+# Custom Actions (Optional - For advanced Python integration)
+# -------------------------------------------------------------------------
+# If you wanted to call a Python function directly from a rail, you'd list it here.
+# actions:
+#   - type: python
+#     action: check_permissions
