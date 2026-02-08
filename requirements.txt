@@ -1,0 +1,10 @@
+langchain
+langchain-groq
+langgraph
+pydantic
+streamlit
+python-dotenv
+mcp[cli]            
+nemoguardrails    
+uvicorn          
+fastapi
