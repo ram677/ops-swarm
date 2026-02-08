@@ -10,19 +10,20 @@ from langchain_core.messages import SystemMessage, HumanMessage
 # Local Imports
 from src.state import AgentState
 from src.mcp_client import execute_tool
+from config.settings import settings
 
 # Load Environment Variables
 load_dotenv()
 
 # --- 1. SETUP ---
 # Initialize Groq LLM
-if not os.getenv("GROQ_API_KEY"):
+if not settings.GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY is missing. Please check your .env file.")
 
 llm = ChatGroq(
-    model="llama-3-70b-versatile",
-    temperature=0,
-    max_tokens=1024
+    model=settings.GROQ_MODEL,
+    temperature=settings.TEMPERATURE,
+    api_key=settings.GROQ_API_KEY
 )
 
 # --- 2. NODES (The Logic Steps) ---
