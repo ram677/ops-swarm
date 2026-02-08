@@ -2,11 +2,14 @@ import os
 import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from config.settings import settings
 
 # 1. Dynamic Path Resolution
 # This ensures the client finds the server script regardless of where you run the command from.
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_SCRIPT_PATH = os.path.join(CURRENT_DIR, "mcp_server.py")
+# CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+# SERVER_SCRIPT_PATH = os.path.join(CURRENT_DIR, "mcp_server.py")
+
+SERVER_SCRIPT_PATH = str(settings.MCP_SERVER_SCRIPT)
 
 async def execute_tool(tool_name: str, arguments: dict = None) -> str:
     """
