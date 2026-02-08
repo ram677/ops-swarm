@@ -1,102 +1,156 @@
 import os
-import json
+import asyncio
+from dotenv import load_dotenv
+
+# LangGraph & LangChain Imports
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
-from src.state import AgentState, IncidentContext
-from mcp.client.stdio import stdio_client, StdioServerParameters
-from mcp.client.session import ClientSession
-from dotenv import load_dotenv
 
+# Local Imports
+from src.state import AgentState
+from src.mcp_client import execute_tool
+
+# Load Environment Variables
 load_dotenv()
 
-# --- SETUP ---
-llm = ChatGroq(model="llama-3-70b-versatile", temperature=0)
+# --- 1. SETUP ---
+# Initialize Groq LLM
+if not os.getenv("GROQ_API_KEY"):
+    raise ValueError("GROQ_API_KEY is missing. Please check your .env file.")
 
-# Connect to our local MCP Server script
-server_params = StdioServerParameters(
-    command="python", 
-    args=["src/mcp_server.py"] # Path to your server file
+llm = ChatGroq(
+    model="llama-3-70b-versatile",
+    temperature=0,
+    max_tokens=1024
 )
 
-# --- NODES ---
+# --- 2. NODES (The Logic Steps) ---
 
 async def diagnose_node(state: AgentState):
-    """Agent analyzes logs and identifies the issue."""
+    """
+    Step 1: Analyze logs and identify the root cause.
+    """
+    print("--- [Agent] Diagnosing Incident ---")
     logs = state["context"].logs
     
-    # In a real app, we would use NeMo Guardrails here.
-    # For simplicity in this file, we use direct LLM prompting.
-    
+    # Prompt Engineering for Root Cause Analysis
     prompt = f"""
-    You are a Site Reliability Engineer. Analyze these logs:
+    You are a Senior Site Reliability Engineer (SRE).
+    Analyze the following server logs and identify the specific service failure and error type.
+    
+    LOGS:
     {logs}
     
-    Identify the root cause service and the specific error.
-    Return ONLY a concise diagnosis string.
+    Output ONLY a concise diagnosis (e.g., 'Database Shard 04 Connection Refused').
+    Do not propose fixes yet.
     """
+    
     response = await llm.ainvoke([HumanMessage(content=prompt)])
     
+    # Update State
     state["context"].diagnosis = response.content
-    state["messages"].append(f"🔍 Diagnosis: {response.content}")
+    state["messages"].append(f"🔍 **Diagnosis:** {response.content}")
+    
     return state
 
 async def plan_node(state: AgentState):
-    """Agent consults tools to propose a fix."""
+    """
+    Step 2: Check current system status using MCP tools and propose a fix.
+    """
+    print("--- [Agent] Planning Fix ---")
     diagnosis = state["context"].diagnosis
     
-    # We use the MCP Client to check DB status before proposing a fix
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            
-            # The agent decides to check the DB status based on diagnosis
-            # (Hardcoded logic for demo stability, but usually LLM decides)
-            tool_result = await session.call_tool("check_db_status", arguments={"shard_id": "DB_SHARD_04"})
-            
-            db_status = tool_result.content[0].text
-            
-    proposal = f"Restart DB_SHARD_04 (Status: {db_status})"
+    # 2a. Use MCP Tool to check status (RAG/Lookup)
+    # We ask the tool "check_db_status" to verify the shard mentioned in diagnosis.
+    # In a real agent, the LLM would decide which tool to call. Here we hardcode the safely path for the demo.
+    tool_result = await execute_tool("check_db_status", {"shard_id": "DB_SHARD_04"})
     
+    # 2b. Generate a Plan based on Diagnosis + Tool Output
+    prompt = f"""
+    Diagnosis: {diagnosis}
+    Current System Status: {tool_result}
+    
+    Propose a specific remediation action using available tools.
+    Available Tools: ['restart_resource', 'fetch_service_logs']
+    
+    Output ONLY the recommended action in this format:
+    "Action: <ToolName> <Args>"
+    Example: "Action: restart_resource DB_SHARD_04"
+    """
+    
+    response = await llm.ainvoke([HumanMessage(content=prompt)])
+    proposal = response.content.strip()
+    
+    # Update State
     state["context"].proposed_action = proposal
-    state["messages"].append(f"🛠️ Proposed Plan: {proposal}")
-    state["require_approval"] = True # TRIGGER HUMAN APPROVAL
+    state["messages"].append(f"🛠️ **Proposed Plan:** {proposal}")
+    state["messages"].append(f"📊 **Live Status Check:** {tool_result}")
+    
+    # CRITICAL: Trigger Human-in-the-Loop
+    state["require_approval"] = True 
+    state["context"].action_status = "PENDING"
+    
     return state
 
 async def execute_node(state: AgentState):
-    """Executes the tool via MCP."""
-    action = state["context"].proposed_action
+    """
+    Step 3: Execute the fix ONLY if approved.
+    """
+    print("--- [Agent] Executing Fix ---")
+    action_status = state["context"].action_status
+    proposal = state["context"].proposed_action
     
-    if state["context"].action_status != "APPROVED":
-        state["messages"].append("⛔ Execution Blocked: Approval missing.")
+    # Safety Check: If not approved, DO NOT execute.
+    if action_status != "APPROVED":
+        msg = "⛔ **Execution Blocked:** Waiting for Human Approval."
+        state["messages"].append(msg)
         return state
 
-    # Execute via MCP
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool("restart_resource", arguments={"resource_id": "DB_SHARD_04"})
+    # Parse the proposal (Simple parsing for demo)
+    # Assuming proposal format: "Action: restart_resource DB_SHARD_04"
+    try:
+        if "restart_resource" in proposal:
+            resource_id = proposal.split("restart_resource")[-1].strip()
             
-    state["messages"].append(f"✅ Execution Result: {result.content[0].text}")
-    state["context"].action_status = "EXECUTED"
+            # CALL MCP TOOL
+            result = await execute_tool("restart_resource", {"resource_id": resource_id})
+            
+            state["messages"].append(f"✅ **Execution Success:** {result}")
+            state["context"].action_status = "EXECUTED"
+        else:
+            state["messages"].append("⚠️ **Error:** Unknown action type.")
+            
+    except Exception as e:
+        state["messages"].append(f"❌ **Execution Failed:** {str(e)}")
+
     return state
 
-# --- GRAPH BUILDER ---
+# --- 3. GRAPH CONSTRUCTION ---
 
 def build_graph():
+    """
+    Builds the StateGraph for the OpsSwarm Agent.
+    """
     workflow = StateGraph(AgentState)
-    
+
+    # Add Nodes
     workflow.add_node("diagnose", diagnose_node)
     workflow.add_node("plan", plan_node)
     workflow.add_node("execute", execute_node)
-    
+
+    # Define Edges (The Logic Flow)
     workflow.set_entry_point("diagnose")
+    
+    # Diagnose -> Plan
     workflow.add_edge("diagnose", "plan")
     
-    # Conditional Edge: If approval needed, stop. Else (or after approval), go to execute.
-    # Note: Streamlit handles the 'Stop', so we just map flow.
-    workflow.add_edge("plan", "execute") 
-    workflow.add_edge("execute", END)
+    # Plan -> Execute
+    # (Note: In Streamlit, the app pauses after 'plan' because 'execute' checks for approval.
+    # When the user clicks 'Approve', we re-run the graph, and 'execute' proceeds.)
+    workflow.add_edge("plan", "execute")
     
-    return workflow.compile()
+    # Execute -> End
+    workflow.add_edge("execute", END)
 
+    return workflow.compile()
