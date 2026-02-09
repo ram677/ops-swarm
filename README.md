@@ -90,6 +90,8 @@ opsswarm/
 ├── requirements.txt        # Dependencies
 └── .env                    # Secrets (API Keys)
 ```
+---
+
 ### Installation
 
 1.  **Install Dependencies**
@@ -112,3 +114,11 @@ opsswarm/
     ```bash
     streamlit run app.py
     ```
+
+---
+
+## 🔮 Future Roadmap
+
+- **Kubernetes Integration**: Move MCP server to a sidecar pod for K8s cluster management.
+- **Slack Integration**: Allow approval/rejection directly via Slack channels.
+- **RAG Knowledge Base**: Indexing past incident reports (Post-Mortems) to improve diagnosis accuracy.
