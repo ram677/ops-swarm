@@ -89,7 +89,7 @@ opsswarm/
 ├── app.py                  # Streamlit Dashboard Entry Point
 ├── requirements.txt        # Dependencies
 └── .env                    # Secrets (API Keys)
-
+```
 ### Installation
 
 1.  **Install Dependencies**
