@@ -2,10 +2,11 @@ import streamlit as st
 import asyncio
 from src.graph import build_graph
 from src.state import IncidentContext
+from config.settings import settings
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="OpsSwarm | Autonomous SRE",
+    page_title=f"{settings.APP_NAME} | Dashboard",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -23,9 +24,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 2. SESSION STATE MANAGEMENT ---
-# Streamlit reruns the script on every interaction. We must persist data.
 if "app_state" not in st.session_state:
-    st.session_state.app_state = None  # Stores the Agent's memory
+    st.session_state.app_state = None
 if "incident_active" not in st.session_state:
     st.session_state.incident_active = False
 if "logs" not in st.session_state:
@@ -34,7 +34,7 @@ if "logs" not in st.session_state:
 # --- 3. SIDEBAR: INCIDENT SIMULATOR ---
 with st.sidebar:
     st.header("🚨 Incident Simulator")
-    st.info("Simulate a production outage to trigger the Autonomous Agent.")
+    st.info(f"System: {settings.APP_NAME} v{settings.APP_VERSION}")
     
     selected_scenario = st.selectbox(
         "Select Scenario", 
@@ -52,6 +52,8 @@ with st.sidebar:
         """
     elif selected_scenario == "High Latency (Auth)":
         logs_preview = "[WARN] Auth Service response time > 2000ms."
+    elif selected_scenario == "Disk Full (Logs)":
+        logs_preview = "[CRITICAL] /var/log partition at 99% usage. Write failed."
     
     st.text_area("Live Server Logs", value=logs_preview, height=150, disabled=True)
     
@@ -73,13 +75,12 @@ with st.sidebar:
         st.rerun()
 
 # --- 4. MAIN DASHBOARD ---
-st.title("🛡️ OpsSwarm: Autonomous Infrastructure Healer")
+st.title(f"🛡️ {settings.APP_NAME}")
 st.markdown("---")
 
 if not st.session_state.incident_active:
     st.success("✅ Systems Operational. No active incidents.")
-    st.image("https://img.freepik.com/free-vector/server-room-rack-center-cloud-database-backup-mining-farm-dark-interior-vector-illustration_107791-2487.jpg", width=600)
-
+    # Optional: Add a placeholder image or graph here
 else:
     # --- INCIDENT ACTIVE VIEW ---
     
@@ -102,7 +103,6 @@ else:
         
         with st.status("🤖 **Agent AI is investigating...**", expanded=True) as status:
             st.write("🔍 Analyzing Logs...")
-            # We use asyncio.run to execute the async graph in Streamlit
             final_state = asyncio.run(graph.ainvoke(initial_inputs))
             st.session_state.app_state = final_state
             status.update(label="✅ Analysis Complete", state="complete", expanded=False)
@@ -118,7 +118,6 @@ else:
     with col_kpi:
         st.subheader("Live Telemetry")
         
-        # Status Box
         st.markdown(f"""
         <div class="status-box">
             <div class="metric-label">Incident ID</div>
@@ -139,7 +138,7 @@ else:
     with col_chat:
         st.subheader("Agent Operations Log")
         
-        # Chat History
+        # Chat History Container
         chat_container = st.container(height=400)
         with chat_container:
             for msg in state["messages"]:
@@ -151,13 +150,18 @@ else:
                     st.chat_message("ai").success(msg)
                 elif "Blocked" in msg:
                     st.chat_message("ai").error(msg)
+                elif "SECURITY ALERT" in msg:
+                    st.chat_message("ai", avatar="🚨").error(msg)
+                elif "Operator" in msg:
+                    st.chat_message("user").write(msg)
+                else:
+                    st.chat_message("ai").write(msg)
 
         # HUMAN IN THE LOOP CONTROLS
         if ctx.action_status == "PENDING" and ctx.proposed_action:
             st.markdown("### 🛑 Human Approval Required")
             st.warning(f"**Proposed Action:** `{ctx.proposed_action}`")
             
-            # Action Buttons
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:
                 if st.button("✅ Approve & Execute"):
@@ -178,4 +182,29 @@ else:
 
         elif ctx.action_status == "EXECUTED":
              st.success("🎉 Incident Resolved Successfully.")
-             st.balloons()
+             # Optional: st.balloons()
+
+    # --- 5. MANUAL OPERATOR CONSOLE (GUARDRAILS TEST) ---
+    st.markdown("---")
+    st.subheader("👨‍💻 Manual Operator Console (Guardrails Test)")
+    
+    # Chat Input for testing Guardrails
+    user_override = st.chat_input("Type a manual command (e.g., 'Check status' or 'Delete DB')...")
+    
+    if user_override:
+        # Add user message to state
+        state["messages"].append(f"👤 **Operator:** {user_override}")
+        
+        # SIMULATE GUARDRAIL CHECK
+        # In a full deployment, this is handled by rails.generate() inside the graph.
+        # For the demo, we explicitly visualize the interception.
+        dangerous_keywords = ["delete", "destroy", "drop", "rm -rf", "wipe"]
+        
+        if any(word in user_override.lower() for word in dangerous_keywords):
+            response = "⛔ **SECURITY ALERT:** I am blocked from executing destructive commands by the OpsSwarm Safety Policy."
+            state["messages"].append(response)
+        else:
+            state["messages"].append(f"🤖 **Agent:** Acknowledged. Processing manual command: '{user_override}'")
+            # Here you could optionally trigger a graph re-run if you wanted real logic
+        
+        st.rerun()
