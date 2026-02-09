@@ -121,4 +121,4 @@ opsswarm/
 
 - **Kubernetes Integration**: Move MCP server to a sidecar pod for K8s cluster management.
 - **Slack Integration**: Allow approval/rejection directly via Slack channels.
-- **RAG Knowledge Base**: Indexing past incident reports (Post-Mortems) to improve diagnosis accuracy.
+- **RAG Knowledge Base**: Indexing past incident reports (Post-Mortems) to improve diagnosis accuracy
