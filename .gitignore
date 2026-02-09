@@ -11,3 +11,29 @@ wheels/
 
 # Environment variables
 .env
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+# Keep config.toml if it just has theme settings, but ignore secrets
+
+# --- LangChain / LangGraph ---
+.langchain/
+langchain.db
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS Generated Files ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
