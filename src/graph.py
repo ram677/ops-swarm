@@ -16,10 +16,6 @@ from config.settings import settings
 load_dotenv()
 
 # --- 1. SETUP ---
-# Initialize Groq LLM
-if not settings.GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY is missing. Please check your .env file.")
-
 llm = ChatGroq(
     model=settings.GROQ_MODEL,
     temperature=settings.TEMPERATURE,
@@ -32,10 +28,13 @@ async def diagnose_node(state: AgentState):
     """
     Step 1: Analyze logs and identify the root cause.
     """
+    # If we are already approved/executing, skip re-diagnosis to save tokens/time
+    if state["context"].action_status == "APPROVED":
+        return state
+
     print("--- [Agent] Diagnosing Incident ---")
     logs = state["context"].logs
     
-    # Prompt Engineering for Root Cause Analysis
     prompt = f"""
     You are a Senior Site Reliability Engineer (SRE).
     Analyze the following server logs and identify the specific service failure and error type.
@@ -49,7 +48,6 @@ async def diagnose_node(state: AgentState):
     
     response = await llm.ainvoke([HumanMessage(content=prompt)])
     
-    # Update State
     state["context"].diagnosis = response.content
     state["messages"].append(f"🔍 **Diagnosis:** {response.content}")
     
@@ -57,17 +55,18 @@ async def diagnose_node(state: AgentState):
 
 async def plan_node(state: AgentState):
     """
-    Step 2: Check current system status using MCP tools and propose a fix.
+    Step 2: Check system status and propose a fix.
     """
+    # --- FIX: If already approved, pass through to execution immediately ---
+    if state["context"].action_status == "APPROVED":
+        return state
+
     print("--- [Agent] Planning Fix ---")
     diagnosis = state["context"].diagnosis
     
-    # 2a. Use MCP Tool to check status (RAG/Lookup)
-    # We ask the tool "check_db_status" to verify the shard mentioned in diagnosis.
-    # In a real agent, the LLM would decide which tool to call. Here we hardcode the safely path for the demo.
+    # Check status tool
     tool_result = await execute_tool("check_db_status", {"shard_id": "DB_SHARD_04"})
     
-    # 2b. Generate a Plan based on Diagnosis + Tool Output
     prompt = f"""
     Diagnosis: {diagnosis}
     Current System Status: {tool_result}
@@ -88,7 +87,7 @@ async def plan_node(state: AgentState):
     state["messages"].append(f"🛠️ **Proposed Plan:** {proposal}")
     state["messages"].append(f"📊 **Live Status Check:** {tool_result}")
     
-    # CRITICAL: Trigger Human-in-the-Loop
+    # Set to PENDING to trigger the pause
     state["require_approval"] = True 
     state["context"].action_status = "PENDING"
     
@@ -102,14 +101,15 @@ async def execute_node(state: AgentState):
     action_status = state["context"].action_status
     proposal = state["context"].proposed_action
     
-    # Safety Check: If not approved, DO NOT execute.
+    # Safety Check
     if action_status != "APPROVED":
         msg = "⛔ **Execution Blocked:** Waiting for Human Approval."
-        state["messages"].append(msg)
+        # Avoid duplicate messages if looping
+        if not state["messages"] or state["messages"][-1] != msg:
+            state["messages"].append(msg)
         return state
 
-    # Parse the proposal (Simple parsing for demo)
-    # Assuming proposal format: "Action: restart_resource DB_SHARD_04"
+    # Parse and Execute
     try:
         if "restart_resource" in proposal:
             resource_id = proposal.split("restart_resource")[-1].strip()
@@ -117,7 +117,8 @@ async def execute_node(state: AgentState):
             # CALL MCP TOOL
             result = await execute_tool("restart_resource", {"resource_id": resource_id})
             
-            state["messages"].append(f"✅ **Execution Success:** {result}")
+            success_msg = f"✅ **Execution Result:** {result}"
+            state["messages"].append(success_msg)
             state["context"].action_status = "EXECUTED"
         else:
             state["messages"].append("⚠️ **Error:** Unknown action type.")
@@ -130,28 +131,15 @@ async def execute_node(state: AgentState):
 # --- 3. GRAPH CONSTRUCTION ---
 
 def build_graph():
-    """
-    Builds the StateGraph for the OpsSwarm Agent.
-    """
     workflow = StateGraph(AgentState)
 
-    # Add Nodes
     workflow.add_node("diagnose", diagnose_node)
     workflow.add_node("plan", plan_node)
     workflow.add_node("execute", execute_node)
 
-    # Define Edges (The Logic Flow)
     workflow.set_entry_point("diagnose")
-    
-    # Diagnose -> Plan
     workflow.add_edge("diagnose", "plan")
-    
-    # Plan -> Execute
-    # (Note: In Streamlit, the app pauses after 'plan' because 'execute' checks for approval.
-    # When the user clicks 'Approve', we re-run the graph, and 'execute' proceeds.)
     workflow.add_edge("plan", "execute")
-    
-    # Execute -> End
     workflow.add_edge("execute", END)
 
     return workflow.compile()
