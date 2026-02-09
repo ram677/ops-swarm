@@ -4,7 +4,7 @@
 
 > **A production-grade Agentic System designed to detect, diagnose, and resolve infrastructure incidents autonomously—with strict Human-in-the-Loop governance.**
 
-![Main Dashboard](results/test_1.1.png)
+![Main Dashboard](results/dash_board.png)
 
 ---
 
